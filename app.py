@@ -38,7 +38,7 @@ MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION = "2024-02-15-preview"
 load_dotenv()
 
 # UI configuration (optional)
-UI_TITLE = os.environ.get("UI_TITLE") or "test21050"
+UI_TITLE = os.environ.get("UI_TITLE") or "Contoso"
 UI_LOGO = os.environ.get("UI_LOGO")
 UI_CHAT_LOGO = os.environ.get("UI_CHAT_LOGO")
 UI_CHAT_TITLE = os.environ.get("UI_CHAT_TITLE") or "Start chatting"
@@ -269,6 +269,7 @@ frontend_settings = {
 }
 # Enable Microsoft Defender for Cloud Integration
 MS_DEFENDER_ENABLED = os.environ.get("MS_DEFENDER_ENABLED", "false").lower() == "true"
+
 
 def should_use_data():
     global DATASOURCE_TYPE
@@ -735,16 +736,18 @@ def prepare_model_args(request_body, request_headers):
             messages.append({"role": message["role"], "content": message["content"]})
 
     user_json = None
-    if (MS_DEFENDER_ENABLED):
+    if MS_DEFENDER_ENABLED:
         authenticated_user_details = get_authenticated_user_details(request_headers)
         tenantId = get_tenantid(authenticated_user_details.get("client_principal_b64"))
-        conversation_id = request_body.get("conversation_id", None)        
+        conversation_id = request_body.get("conversation_id", None)
         user_args = {
-            "EndUserId": authenticated_user_details.get('user_principal_id'),
-            "EndUserIdType": 'Entra',
+            "EndUserId": authenticated_user_details.get("user_principal_id"),
+            "EndUserIdType": "Entra",
             "EndUserTenantId": tenantId,
             "ConversationId": conversation_id,
-            "SourceIp": request_headers.get('X-Forwarded-For', request_headers.get('Remote-Addr', '')),
+            "SourceIp": request_headers.get(
+                "X-Forwarded-For", request_headers.get("Remote-Addr", "")
+            ),
         }
         user_json = json.dumps(user_args)
 
@@ -842,17 +845,21 @@ async def send_chat_request(request_body, request_headers):
     filtered_messages = []
     messages = request_body.get("messages", [])
     for message in messages:
-        if message.get("role") != 'tool':
+        if message.get("role") != "tool":
             filtered_messages.append(message)
-            
-    request_body['messages'] = filtered_messages
+
+    request_body["messages"] = filtered_messages
     model_args = prepare_model_args(request_body, request_headers)
 
     try:
         azure_openai_client = init_openai_client()
-        raw_response = await azure_openai_client.chat.completions.with_raw_response.create(**model_args)
+        raw_response = (
+            await azure_openai_client.chat.completions.with_raw_response.create(
+                **model_args
+            )
+        )
         response = raw_response.parse()
-        apim_request_id = raw_response.headers.get("apim-request-id") 
+        apim_request_id = raw_response.headers.get("apim-request-id")
     except Exception as e:
         logging.exception("Exception in send_chat_request")
         raise e
@@ -865,21 +872,30 @@ async def complete_chat_request(request_body, request_headers):
         response = await promptflow_request(request_body)
         history_metadata = request_body.get("history_metadata", {})
         return format_pf_non_streaming_response(
-            response, history_metadata, PROMPTFLOW_RESPONSE_FIELD_NAME, PROMPTFLOW_CITATIONS_FIELD_NAME
+            response,
+            history_metadata,
+            PROMPTFLOW_RESPONSE_FIELD_NAME,
+            PROMPTFLOW_CITATIONS_FIELD_NAME,
         )
     else:
-        response, apim_request_id = await send_chat_request(request_body, request_headers)
+        response, apim_request_id = await send_chat_request(
+            request_body, request_headers
+        )
         history_metadata = request_body.get("history_metadata", {})
-        return format_non_streaming_response(response, history_metadata, apim_request_id)
+        return format_non_streaming_response(
+            response, history_metadata, apim_request_id
+        )
 
 
 async def stream_chat_request(request_body, request_headers):
     response, apim_request_id = await send_chat_request(request_body, request_headers)
     history_metadata = request_body.get("history_metadata", {})
-    
+
     async def generate():
         async for completionChunk in response:
-            yield format_stream_response(completionChunk, history_metadata, apim_request_id)
+            yield format_stream_response(
+                completionChunk, history_metadata, apim_request_id
+            )
 
     return generate()
 
